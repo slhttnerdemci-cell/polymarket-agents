@@ -1,17 +1,21 @@
-# Polymarket Multi-Agent Paper Trading System
+# Polymarket paper masası
 
-Hybrid multi-agent system for Polymarket 5-minute crypto Up/Down markets.
+5 dakikalık kripto Up/Down piyasası için paper trading. Altı modül sinyal üretir. Orkestratör `al`, `sat` veya `bekle` der. Execution Engine emri o anki deftere yürür. Gerçek emir ve cüzdan yoktur.
 
-## Agents
-- PULSE: Order book imbalance
-- IMPACT: Price impact estimation
-- EDGE: Net edge after costs
-- SIZE: Position sizing
-- ENTRY: Limit price calculation
-- EXIT: Exit rules
+## Çalıştırma
 
-## Quick Start
 ```bash
 pip install -r requirements.txt
+python -m unittest tests.test_desk
 streamlit run ui/dashboard.py
 ```
+
+Tek pencereyi terminalden çalıştırmak için:
+
+```bash
+python -m simulation.run_paper
+```
+
+Arayüzden değişen değerler kenar eşiği, tampon, ücret katsayısı, risk, tutma süresi ve sanal bankrolldur. BTC 5 dakikalık ücret katsayısı 0,05'tir. Maliyet `pay × katsayı × fiyat × (1 − fiyat)` ile her iki bacağa uygulanır.
+
+Kapanan kâr, dolan payın giriş ve çıkış fiyatından ücret düşülerek yazılır. Açık pozisyon bu sayıya girmez.

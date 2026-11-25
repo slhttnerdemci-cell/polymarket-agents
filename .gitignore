@@ -1,6 +1,5 @@
+# Paper run archive. Recreated on the machine that runs the desk.
+data/*.json
 __pycache__/
 *.pyc
-.env
-.venv
-venv/
-*.log
+.streamlit/
