@@ -1,3 +1,4 @@
+import asyncio
 import json
 import time
 from dataclasses import dataclass
@@ -97,12 +98,25 @@ async def fetch_market(
     clock = time.time() if now is None else now
     start = window_start(clock, window_seconds)
     slug = slug_for(asset, start)
-    url = "https://gamma-api.polymarket.com/events"
-    try:
-        async with session.get(url, params={"slug": slug}) as resp:
-            if resp.status != 200:
-                return None
-            payload = await resp.json()
-    except (aiohttp.ClientError, TimeoutError, json.JSONDecodeError):
+    payload = await _get_json(session, "https://gamma-api.polymarket.com/events", {"slug": slug})
+    market = parse_event(payload, asset, start, window_seconds) if payload is not None else None
+    if market is not None:
+        return market
+    payload = await _get_json(session, f"https://gamma-api.polymarket.com/events/slug/{slug}", None)
+    if payload is None:
         return None
     return parse_event(payload, asset, start, window_seconds)
+
+
+async def _get_json(session: aiohttp.ClientSession, url: str, params: dict | None):
+    for attempt in range(2):
+        try:
+            async with session.get(url, params=params) as resp:
+                if resp.status != 200:
+                    return None
+                return await resp.json()
+        except (aiohttp.ClientError, TimeoutError, json.JSONDecodeError):
+            if attempt == 1:
+                return None
+            await asyncio.sleep(0.4)
+    return None

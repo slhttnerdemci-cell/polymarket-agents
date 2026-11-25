@@ -6,7 +6,7 @@ import aiohttp
 
 from agents.impact import append_sample, frozen_coefficients
 from core.params import Params
-from core.markets import fetch_market
+from core.markets import fetch_market, slug_for, window_start
 from core.orderbook import BookSnapshot, fetch_book
 from engine.execution import walk_buy, walk_sell
 from engine.orchestrator import decide
@@ -33,6 +33,31 @@ class Report:
         return asdict(self)
 
 
+def _cycle_view(market, decision, portfolio: Portfolio, now: float, counts: dict) -> dict:
+    sides = []
+    for side in decision.sides:
+        sides.append({
+            "outcome": side.outcome,
+            "imbalance": side.imbalance,
+            "edge": side.edge,
+            "note": side.note,
+            "shares": side.shares,
+        })
+    open_position = _position_dict(portfolio.position) if portfolio.position is not None else None
+    return {
+        "question": market.question or market.slug,
+        "remaining": max(0.0, market.end_ts - now),
+        "action": decision.action,
+        "reason": decision.reason,
+        "outcome": decision.outcome,
+        "cash": portfolio.cash,
+        "realized_pnl": portfolio.realized_pnl,
+        "open_position": open_position,
+        "counts": dict(counts),
+        "sides": sides,
+    }
+
+
 def log_line(report: Report, message: str) -> None:
     report.log.append(message)
     try:
@@ -41,7 +66,7 @@ def log_line(report: Report, message: str) -> None:
         print(message.encode("ascii", "replace").decode("ascii"), flush=True)
 
 
-async def run_simulation(params: Params | None = None, archive_path=None) -> Report:
+async def run_simulation(params: Params | None = None, archive_path=None, on_cycle=None, max_cycles: int | None = None) -> Report:
     """Run one 5-minute window. Paper fills only. No wallet and no LLM."""
     settings = params or Params.from_config()
     report = Report(cash=settings.bankroll)
@@ -49,7 +74,8 @@ async def run_simulation(params: Params | None = None, archive_path=None) -> Rep
     async with aiohttp.ClientSession(timeout=timeout) as session:
         market = await fetch_market(session, settings.asset, window_seconds=settings.window_seconds)
         if market is None:
-            report.error = "Acik 5 dakikalik piyasa bulunamadi."
+            start = window_start(time.time(), settings.window_seconds)
+            report.error = f"Acik 5 dakikalik piyasa bulunamadi ({slug_for(settings.asset, start)})."
             log_line(report, report.error)
             return report
         report.question = market.question
@@ -72,6 +98,7 @@ async def run_simulation(params: Params | None = None, archive_path=None) -> Rep
         counts = {"buy": 0, "sell": 0, "wait": 0, "unfilled": 0}
         deadline = market.end_ts + 10
         flattened_after_end = False
+        cycles = 0
         log_line(report, f"Pencere {market.slug} | katsayi {source} a={alpha:.4f} b={beta:.4f}")
 
         while time.time() < deadline:
@@ -101,13 +128,19 @@ async def run_simulation(params: Params | None = None, archive_path=None) -> Rep
             elif counts["wait"] == 1 or counts["wait"] % 15 == 0:
                 log_line(report, f"bekle | {decision.reason}")
 
+            if on_cycle is not None:
+                on_cycle(_cycle_view(market, decision, portfolio, now, counts))
+
+            cycles += 1
+            if max_cycles is not None and cycles >= max_cycles:
+                break
             if now >= market.end_ts and portfolio.position is None:
                 break
             if now >= market.end_ts and portfolio.position is not None:
                 if flattened_after_end:
                     break
                 flattened_after_end = True
-            await asyncio.sleep(settings.poll_interval)
+            await asyncio.sleep(max(settings.poll_interval, 0.5))
 
         report.cash = portfolio.cash
         report.realized_pnl = portfolio.realized_pnl

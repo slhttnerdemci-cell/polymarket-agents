@@ -10,6 +10,8 @@ python -m unittest tests.test_desk
 streamlit run ui/dashboard.py
 ```
 
+Arayüzde iki düğme vardır. `Tek tur bak` bir yoklama yapar ve kararı gösterir. `Bu pencereyi çalıştır` pencere kapanana kadar paper turunu sürdürür. Kararlar ekranda tur tur güncellenir.
+
 Tek pencereyi terminalden çalıştırmak için:
 
 ```bash

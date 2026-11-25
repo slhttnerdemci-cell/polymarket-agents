@@ -59,19 +59,20 @@ def decide(
 
     views: list[SideView] = []
     best: tuple[float, SideView, BookSnapshot] | None = None
+    tied = False
     for outcome, book in books.items():
         view, score = _score_entry(outcome, book, params, alpha, beta, cash)
         views.append(view)
         if score is None:
             continue
-        if best is None or score > best[0]:
+        if best is None or score > best[0] + 1e-12:
             best = (score, view, book)
-        elif score == best[0]:
-            best = None
-            break
+            tied = False
+        elif abs(score - best[0]) <= 1e-12:
+            tied = True
 
-    if best is None:
-        reason = _wait_reason(views)
+    if best is None or tied:
+        reason = "kenar esit" if tied else _wait_reason(views)
         return Decision(action="wait", reason=reason, sides=views)
 
     _, view, book = best

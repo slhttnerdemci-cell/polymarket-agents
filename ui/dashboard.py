@@ -13,6 +13,66 @@ from core import config
 from core.params import Params
 from simulation.run_paper import run_simulation
 
+def _fmt(value) -> str:
+    if value is None:
+        return "—"
+    return f"{value:.4f}"
+
+
+def _show_cycle(slot, snap: dict) -> None:
+    with slot.container():
+        st.subheader(snap["question"])
+        left, mid, right = st.columns(3)
+        left.metric("Kalan süre", f"{snap['remaining']:.0f} sn")
+        mid.metric("Kapanan PnL", f"{snap['realized_pnl']:.2f}")
+        right.metric("Nakit", f"{snap['cash']:.2f}")
+        counts = snap["counts"]
+        st.write(
+            f"Son karar: {snap['action']} | {snap['reason']}"
+            + (f" | {snap['outcome']}" if snap.get("outcome") else "")
+        )
+        st.write(f"al {counts.get('buy', 0)} / sat {counts.get('sell', 0)} / bekle {counts.get('wait', 0)}")
+        if snap["sides"]:
+            st.dataframe(
+                [
+                    {
+                        "taraf": side["outcome"],
+                        "dengesizlik": _fmt(side["imbalance"]),
+                        "kenar": _fmt(side["edge"]),
+                        "pay": _fmt(side["shares"]),
+                        "not": side["note"],
+                    }
+                    for side in snap["sides"]
+                ],
+                use_container_width=True,
+            )
+        if snap["open_position"]:
+            st.info("Açık pozisyon kâra yazılmaz.")
+            st.json(snap["open_position"])
+
+
+def _show_report(report) -> None:
+    if report.error:
+        st.error(report.error)
+        return
+    st.write(
+        f"Katsayı kaynağı: {report.coefficient_source} | α={report.alpha:.4f} | β={report.beta:.4f} | "
+        f"eski örnek {report.archive_samples}"
+    )
+    if report.open_position:
+        st.warning("Pencere bitti. Açık pozisyon kâra yazılmadı.")
+        st.json(report.open_position)
+    elif report.trades:
+        st.success("Açık pozisyon yok.")
+    st.write("Kapanan işlemler")
+    if report.trades:
+        st.dataframe(report.trades, use_container_width=True)
+    else:
+        st.write("Kapanan işlem yok.")
+    with st.expander("Günlük"):
+        st.code("\n".join(report.log) if report.log else "Kayıt yok.")
+
+
 st.set_page_config(page_title="Polymarket Agents", layout="wide")
 st.title("Polymarket paper masası")
 st.caption("Ajanlar sinyal üretir. Emri kod yürütür. Gerçek emir ve cüzdan yok.")
@@ -37,31 +97,15 @@ config.USE_ARCHIVE = st.sidebar.checkbox("Eski pencerelerden α ve β kullan", v
 
 st.sidebar.caption("BTC 5 dakikalık ücret katsayısı 0,05. Diğer kripto 0,01. Maliyet fiyata göre hesaplanır.")
 
-if st.button("Bu pencereyi çalıştır"):
+run_window = st.button("Bu pencereyi çalıştır")
+run_once = st.button("Tek tur bak")
+
+if run_window or run_once:
     params = Params.from_config()
-    with st.spinner("Pencere kapanana kadar paper çalışıyor..."):
-        report = asyncio.run(run_simulation(params))
-    if report.error:
-        st.error(report.error)
-    else:
-        st.subheader(report.question or report.slug)
-        left, right, third = st.columns(3)
-        left.metric("Kapanan PnL", f"{report.realized_pnl:.2f}")
-        right.metric("Nakit", f"{report.cash:.2f}")
-        third.metric("Karar", f"al {report.counts.get('buy', 0)} / sat {report.counts.get('sell', 0)} / bekle {report.counts.get('wait', 0)}")
-        st.write(
-            f"Katsayı kaynağı: {report.coefficient_source} | α={report.alpha:.4f} | β={report.beta:.4f} | "
-            f"eski örnek {report.archive_samples}"
-        )
-        if report.open_position:
-            st.warning("Açık pozisyon kâra yazılmadı.")
-            st.json(report.open_position)
-        else:
-            st.success("Açık pozisyon yok.")
-        st.write("Kapanan işlemler")
-        if report.trades:
-            st.dataframe(report.trades, use_container_width=True)
-        else:
-            st.write("Bu pencerede kapanan işlem yok.")
-        with st.expander("Günlük"):
-            st.code("\n".join(report.log))
+    live = st.empty()
+
+    def on_cycle(snap: dict) -> None:
+        _show_cycle(live, snap)
+
+    report = asyncio.run(run_simulation(params, on_cycle=on_cycle, max_cycles=1 if run_once else None))
+    _show_report(report)
