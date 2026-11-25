@@ -33,17 +33,32 @@ class Report:
         return asdict(self)
 
 
-def _cycle_view(market, decision, portfolio: Portfolio, now: float, counts: dict) -> dict:
+def _cycle_view(
+    market,
+    decision,
+    portfolio: Portfolio,
+    now: float,
+    counts: dict,
+    *,
+    alpha: float,
+    beta: float,
+    source: str,
+    hurdle: float,
+    event: str,
+) -> dict:
     sides = []
     for side in decision.sides:
         sides.append({
             "outcome": side.outcome,
             "imbalance": side.imbalance,
+            "exit_estimate": side.exit_estimate,
             "edge": side.edge,
+            "limit_price": side.limit_price,
             "note": side.note,
             "shares": side.shares,
         })
     open_position = _position_dict(portfolio.position) if portfolio.position is not None else None
+    exposure = portfolio.position.exposure_usdc if portfolio.position is not None else 0.0
     return {
         "question": market.question or market.slug,
         "remaining": max(0.0, market.end_ts - now),
@@ -52,9 +67,20 @@ def _cycle_view(market, decision, portfolio: Portfolio, now: float, counts: dict
         "outcome": decision.outcome,
         "cash": portfolio.cash,
         "realized_pnl": portfolio.realized_pnl,
+        "equity": portfolio.cash + exposure,
+        "exposure": exposure,
         "open_position": open_position,
         "counts": dict(counts),
         "sides": sides,
+        "imbalance": decision.imbalance,
+        "alpha": alpha,
+        "beta": beta,
+        "source": source,
+        "hurdle": hurdle,
+        "now": now,
+        "event": event,
+        "limit_price": decision.limit_price,
+        "shares": decision.shares,
     }
 
 
@@ -119,6 +145,7 @@ async def run_simulation(params: Params | None = None, archive_path=None, on_cyc
                 cash=portfolio.cash,
             )
             counts[decision.action] = counts.get(decision.action, 0) + 1
+            logged = len(report.log)
             if decision.action == "buy":
                 _apply_buy(portfolio, decision, up, down, settings, now, market.slug, report)
             elif decision.action == "sell":
@@ -129,7 +156,21 @@ async def run_simulation(params: Params | None = None, archive_path=None, on_cyc
                 log_line(report, f"bekle | {decision.reason}")
 
             if on_cycle is not None:
-                on_cycle(_cycle_view(market, decision, portfolio, now, counts))
+                event = report.log[-1] if len(report.log) > logged else ""
+                on_cycle(
+                    _cycle_view(
+                        market,
+                        decision,
+                        portfolio,
+                        now,
+                        counts,
+                        alpha=alpha,
+                        beta=beta,
+                        source=source,
+                        hurdle=settings.edge_hurdle,
+                        event=event,
+                    )
+                )
 
             cycles += 1
             if max_cycles is not None and cycles >= max_cycles:

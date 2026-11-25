@@ -10,7 +10,7 @@ python -m unittest tests.test_desk
 streamlit run ui/dashboard.py
 ```
 
-Arayüzde iki düğme vardır. `Tek tur bak` bir yoklama yapar ve kararı gösterir. `Bu pencereyi çalıştır` pencere kapanana kadar paper turunu sürdürür. Kararlar ekranda tur tur güncellenir.
+Arayüzde iki düğme vardır. `Tek tur bak` bir yoklama yapar ve kararı gösterir. `Bu pencereyi çalıştır` pencere kapanana kadar paper turunu sürdürür. Ekranda altı modül kartı, akış şeridi, her turun karar satırı ve bakiye eğrisi vardır. Eğrideki nakit, açık pozisyonun maliyetini de tutar. Kapanan PnL ayrıdır. Açık pozisyon kâra yazılmaz.
 
 Tek pencereyi terminalden çalıştırmak için:
 

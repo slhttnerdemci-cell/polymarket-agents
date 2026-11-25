@@ -13,6 +13,8 @@ from core.params import Params
 from engine.execution import walk_buy, walk_sell
 from engine.orchestrator import decide
 from engine.portfolio import Portfolio
+from simulation.run_paper import _cycle_view
+from ui.terminal_view import desk_from_snap, idle_snap
 
 
 def params(**overrides) -> Params:
@@ -235,6 +237,77 @@ class MarketParseTests(unittest.TestCase):
         self.assertEqual(market.up_token, "111")
         self.assertEqual(market.down_token, "222")
         self.assertEqual(market.end_ts, 400)
+
+
+def _snap_for(decision, portfolio=None, event=""):
+    from types import SimpleNamespace
+
+    market = SimpleNamespace(question="BTC 5dk", slug="btc-updown-5m-1", end_ts=2_000)
+    book_cash = portfolio or Portfolio(cash=1000)
+    return _cycle_view(
+        market,
+        decision,
+        book_cash,
+        1_000,
+        {"buy": 0, "sell": 0, "wait": 0},
+        alpha=0.0,
+        beta=0.15,
+        source="arayuz",
+        hurdle=0.017,
+        event=event,
+    )
+
+
+class TerminalViewTests(unittest.TestCase):
+    def test_idle_cards_wait(self):
+        desk = desk_from_snap(idle_snap(1000, 0.0, 0.15, 0.017, now=1_000))
+        states = [module["state"] for module in desk["modules"]]
+        self.assertEqual(states, ["bosta"] * 6)
+        self.assertIn("pozisyon yok", desk["modules"][-1]["detail"])
+
+    def test_weak_edge_stops_at_edge(self):
+        decision = decide(quiet(), quiet(), None, now=1_000, expiry=2_000, params=params(), alpha=0.0, beta=0.0, cash=1000)
+        desk = desk_from_snap(_snap_for(decision))
+        by_name = {module["name"]: module["state"] for module in desk["modules"]}
+        self.assertEqual(by_name["PULSE"], "gecti")
+        self.assertEqual(by_name["IMPACT"], "gecti")
+        self.assertEqual(by_name["EDGE"], "durdu")
+        self.assertEqual(by_name["SIZE"], "bosta")
+        self.assertEqual(by_name["ENTRY"], "bosta")
+        self.assertEqual(by_name["EXIT"], "bosta")
+        self.assertIn("kenar yetmedi", desk["modules"][2]["detail"])
+
+    def test_clock_stops_before_the_book(self):
+        decision = decide(strong_up(), quiet(), None, now=1_990, expiry=2_000, params=params(), alpha=0.0, beta=0.15, cash=1000)
+        desk = desk_from_snap(_snap_for(decision))
+        by_name = {module["name"]: module["state"] for module in desk["modules"]}
+        self.assertEqual(by_name["PULSE"], "bosta")
+        self.assertEqual(by_name["ENTRY"], "durdu")
+
+    def test_buy_marks_entry_and_keeps_open_position_out_of_profit(self):
+        decision = decide(strong_up(), quiet(), None, now=1_000, expiry=2_000, params=params(), alpha=0.0, beta=0.15, cash=1000)
+        portfolio = Portfolio(cash=1000)
+        portfolio.apply_buy("up", "up-token", 10, 4.7, 0.47, 0.05, 0.8, 0.46, 1_000, "w", 20)
+        snap = _snap_for(decision, portfolio, event="AL up 10.00 @ 0.4700")
+        self.assertAlmostEqual(snap["equity"], portfolio.cash + portfolio.position.exposure_usdc)
+        self.assertEqual(snap["realized_pnl"], 0.0)
+        desk = desk_from_snap(snap)
+        by_name = {module["name"]: module for module in desk["modules"]}
+        self.assertEqual(by_name["ENTRY"]["state"], "gecti")
+        self.assertEqual(by_name["EXIT"]["state"], "bosta")
+        self.assertIn("kara yazilmaz", by_name["EXIT"]["detail"])
+        self.assertIn("AL up", desk["line"])
+
+    def test_exit_reason_lights_only_exit(self):
+        portfolio = Portfolio(cash=1000)
+        portfolio.apply_buy("up", "up-token", 10, 4.5, 0.45, 0.02, 0.8, 0.45, 900, "w", 20)
+        faded = book("up-token", [(0.44, 12), (0.43, 10)], [(0.46, 40)])
+        decision = decide(faded, quiet(), portfolio.position, now=910, expiry=2_000, params=params(), alpha=0.0, beta=0.15, cash=portfolio.cash)
+        desk = desk_from_snap(_snap_for(decision, portfolio))
+        by_name = {module["name"]: module["state"] for module in desk["modules"]}
+        self.assertEqual(by_name["EDGE"], "bosta")
+        self.assertEqual(by_name["EXIT"], "gecti")
+        self.assertIn("baski dondu", desk["modules"][-1]["detail"])
 
 
 if __name__ == "__main__":
